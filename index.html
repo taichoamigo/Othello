@@ -3,25 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI対戦オセロ</title>
+    <title>AI対戦オセロ (サイズ選択機能付き)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --board-bg: #008080; /* ティール */
-            --black-piece: #1f2937; /* ダークグレー */
-            --white-piece: #f9fafb; /* オフホワイト */
-            --hint-color: rgba(4, 120, 87, 0.4); /* エメラルド（半透明） */
+            --board-bg: #008080;
+            --black-piece: #1f2937;
+            --white-piece: #f9fafb;
+            --hint-color: rgba(4, 120, 87, 0.4);
             --cell-border: #006060;
+            --board-size: 8; /* デフォルト */
         }
         body {
             font-family: 'Noto Sans JP', sans-serif;
-            touch-action: manipulation; /* ダブルタップによるズームを無効化 */
+            touch-action: manipulation;
+        }
+        #game-container {
+            display: none; /* 最初はゲーム画面を非表示 */
         }
         .board {
             display: grid;
-            grid-template-columns: repeat(8, 1fr);
-            grid-template-rows: repeat(8, 1fr);
+            /* JSから --board-size を設定 */
+            grid-template-columns: repeat(var(--board-size), 1fr);
+            grid-template-rows: repeat(var(--board-size), 1fr);
             width: 90vw;
             height: 90vw;
             max-width: 500px;
@@ -67,7 +72,25 @@
 </head>
 <body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-4">
 
-    <div class="w-full max-w-xl mx-auto">
+    <!-- サイズ選択画面 -->
+    <div id="setup-screen" class="w-full max-w-md mx-auto text-center">
+        <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-8">AI対戦オセロ</h1>
+        <h2 class="text-xl font-semibold text-gray-700 mb-6">盤面のサイズを選んでください</h2>
+        <div class="space-y-4">
+            <button data-size="6" class="size-select-btn w-full bg-teal-500 hover:bg-teal-600 text-white font-bold py-4 px-6 rounded-lg shadow-lg text-lg transition-transform transform hover:scale-105">
+                6 x 6 (練習用)
+            </button>
+            <button data-size="8" class="size-select-btn w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-4 px-6 rounded-lg shadow-lg text-lg transition-transform transform hover:scale-105">
+                8 x 8 (標準)
+            </button>
+            <button data-size="10" class="size-select-btn w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-4 px-6 rounded-lg shadow-lg text-lg transition-transform transform hover:scale-105">
+                10 x 10 (上級者向け)
+            </button>
+        </div>
+    </div>
+
+    <!-- ゲーム画面 -->
+    <div id="game-container" class="w-full max-w-xl mx-auto">
         <h1 class="text-3xl md:text-4xl font-bold text-center text-gray-800 mb-4">AI対戦オセロ</h1>
 
         <!-- ゲーム情報パネル -->
@@ -86,20 +109,23 @@
 
         <!-- メッセージエリア -->
         <div id="message-area" class="text-center text-lg font-semibold text-teal-700 h-8 mb-4"></div>
-    </div>
 
-    <!-- ゲーム盤 -->
-    <div id="board" class="board"></div>
+        <!-- ゲーム盤 -->
+        <div id="board" class="board"></div>
 
-    <!-- ゲームコントロール -->
-    <div class="mt-6">
-        <button id="restart-button" class="bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-transform transform hover:scale-105">
-            新しいゲーム
-        </button>
+        <!-- ゲームコントロール -->
+        <div class="mt-6">
+            <button id="restart-button" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-transform transform hover:scale-105">
+                サイズ選択に戻る
+            </button>
+        </div>
     </div>
 
     <script>
         // --- DOM要素の取得 ---
+        const setupScreen = document.getElementById('setup-screen');
+        const gameContainer = document.getElementById('game-container');
+        const sizeSelectButtons = document.querySelectorAll('.size-select-btn');
         const boardElement = document.getElementById('board');
         const blackScoreElement = document.getElementById('black-score');
         const whiteScoreElement = document.getElementById('white-score');
@@ -110,43 +136,86 @@
         const EMPTY = 0;
         const BLACK = 1; // プレイヤー
         const WHITE = 2; // コンピュータ
-        const BOARD_SIZE = 8;
         const DIRECTIONS = [
-            [-1, -1], [-1, 0], [-1, 1],
-            [0, -1],           [0, 1],
-            [1, -1], [1, 0], [1, 1]
+            [-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]
         ];
+        const AI_DEPTH = 4; // AIの思考の深さ
+
+        // 各サイズごとの盤面評価の重み
+        const WEIGHTS = {
+            6: [
+                [100, -20, 10, 10, -20, 100],
+                [-20, -40, -5, -5, -40, -20],
+                [ 10,  -5,  8,  8,  -5,  10],
+                [ 10,  -5,  8,  8,  -5,  10],
+                [-20, -40, -5, -5, -40, -20],
+                [100, -20, 10, 10, -20, 100]
+            ],
+            8: [
+                [120, -20, 20,  5,  5, 20, -20, 120],
+                [-20, -40, -5, -5, -5, -5, -40, -20],
+                [ 20,  -5, 15,  3,  3, 15,  -5,  20],
+                [  5,  -5,  3,  3,  3,  3,  -5,   5],
+                [  5,  -5,  3,  3,  3,  3,  -5,   5],
+                [ 20,  -5, 15,  3,  3, 15,  -5,  20],
+                [-20, -40, -5, -5, -5, -5, -40, -20],
+                [120, -20, 20,  5,  5, 20, -20, 120]
+            ],
+            10: [
+                [150, -25, 25, 10,  5,  5, 10, 25, -25, 150],
+                [-25, -50, -5, -5, -5, -5, -5, -5, -50, -25],
+                [ 25,  -5, 20,  8,  6,  6,  8, 20,  -5,  25],
+                [ 10,  -5,  8,  4,  2,  2,  4,  8,  -5,  10],
+                [  5,  -5,  6,  2,  1,  1,  2,  6,  -5,   5],
+                [  5,  -5,  6,  2,  1,  1,  2,  6,  -5,   5],
+                [ 10,  -5,  8,  4,  2,  2,  4,  8,  -5,  10],
+                [ 25,  -5, 20,  8,  6,  6,  8, 20,  -5,  25],
+                [-25, -50, -5, -5, -5, -5, -5, -5, -50, -25],
+                [150, -25, 25, 10,  5,  5, 10, 25, -25, 150]
+            ]
+        };
         
-        // AIの思考の深さ（大きいほど強くなるが、計算に時間がかかる）
-        const AI_DEPTH = 4;
-
-        // 各マスの戦略的な価値を評価するための重み付け
-        const POSITION_WEIGHTS = [
-            [120, -20, 20,  5,  5, 20, -20, 120],
-            [-20, -40, -5, -5, -5, -5, -40, -20],
-            [ 20,  -5, 15,  3,  3, 15,  -5,  20],
-            [  5,  -5,  3,  3,  3,  3,  -5,   5],
-            [  5,  -5,  3,  3,  3,  3,  -5,   5],
-            [ 20,  -5, 15,  3,  3, 15,  -5,  20],
-            [-20, -40, -5, -5, -5, -5, -40, -20],
-            [120, -20, 20,  5,  5, 20, -20, 120]
-        ];
-
+        let BOARD_SIZE;
+        let POSITION_WEIGHTS;
         let board = [];
         let currentPlayer;
         let gameOver;
-        let playerTurnBlocked = false; // プレイヤーの操作を一時的に無効化
+        let playerTurnBlocked = false;
 
         // --- イベントリスナー ---
-        restartButton.addEventListener('click', initGame);
+        sizeSelectButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const size = parseInt(button.dataset.size);
+                startGame(size);
+            });
+        });
+
+        restartButton.addEventListener('click', () => {
+            gameContainer.style.display = 'none';
+            setupScreen.style.display = 'block';
+        });
+
+        // --- ゲーム開始 ---
+        function startGame(size) {
+            BOARD_SIZE = size;
+            POSITION_WEIGHTS = WEIGHTS[size];
+            document.documentElement.style.setProperty('--board-size', size);
+            
+            setupScreen.style.display = 'none';
+            gameContainer.style.display = 'block';
+            
+            initGame();
+        }
 
         // --- ゲームの初期化 ---
         function initGame() {
             board = Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(EMPTY));
-            board[3][3] = WHITE;
-            board[3][4] = BLACK;
-            board[4][3] = BLACK;
-            board[4][4] = WHITE;
+            const center1 = BOARD_SIZE / 2 - 1;
+            const center2 = BOARD_SIZE / 2;
+            board[center1][center1] = WHITE;
+            board[center1][center2] = BLACK;
+            board[center2][center1] = BLACK;
+            board[center2][center2] = WHITE;
             
             currentPlayer = BLACK;
             gameOver = false;
@@ -178,7 +247,6 @@
                         if (pieceValue === BLACK) blackCount++;
                         else whiteCount++;
                     } else if (currentPlayer === BLACK && !playerTurnBlocked) {
-                        // プレイヤーの有効な手を表示
                         const isMoveValid = validMoves.some(move => move.r === r && move.c === c);
                         if (isMoveValid) {
                             const hint = document.createElement('div');
@@ -202,10 +270,8 @@
         // --- セルクリック時の処理 ---
         function handleCellClick(r, c) {
             if (gameOver || currentPlayer !== BLACK || playerTurnBlocked) return;
-
             const validMoves = getValidMoves(BLACK);
             const isValid = validMoves.some(move => move.r === r && move.c === c);
-
             if (isValid) {
                 makeMove(r, c, BLACK);
             }
@@ -215,52 +281,40 @@
         function makeMove(r, c, player) {
             const piecesToFlip = getFlips(r, c, player);
             if (piecesToFlip.length === 0) return;
-
             board[r][c] = player;
-            piecesToFlip.forEach(p => {
-                board[p.r][p.c] = player;
-            });
-            
+            piecesToFlip.forEach(p => { board[p.r][p.c] = player; });
             switchTurn();
         }
         
-        // --- ターンを切り替える (修正済み) ---
+        // --- ターンを切り替える ---
         async function switchTurn() {
-            renderBoard(); // まず、実行された手を盤面に反映します
+            renderBoard();
             currentPlayer = (currentPlayer === BLACK) ? WHITE : BLACK;
 
-            if (checkGameOver()) {
-                return;
-            }
+            if (checkGameOver()) return;
 
             const validMoves = getValidMoves(currentPlayer);
-
-            // 現在のプレイヤーが置ける場所がない場合、パスする
             if (validMoves.length === 0) {
                 updateMessage(`${currentPlayer === BLACK ? 'あなた' : 'AI'}はパスしました`);
-                await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5秒待つ
-                currentPlayer = (currentPlayer === BLACK) ? WHITE : BLACK; // ターンを相手に戻す
-                
-                // 相手も置けない場合はゲーム終了
-                if (checkGameOver()) return; 
-                
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                currentPlayer = (currentPlayer === BLACK) ? WHITE : BLACK;
+                if (checkGameOver()) return;
                 const nextValidMoves = getValidMoves(currentPlayer);
                 if(nextValidMoves.length === 0) {
-                    checkGameOver(); // 両者パスならゲーム終了
+                    checkGameOver();
                     return;
                 }
             }
 
-            // 次のターンの準備
             if (currentPlayer === WHITE) {
-                playerTurnBlocked = true; // プレイヤーの操作をブロック
+                playerTurnBlocked = true;
                 updateMessage('AIが考えています...');
-                renderBoard(); // AIの思考中にヒントが表示されないように盤面を再描画
+                renderBoard();
                 setTimeout(computerTurn, 500);
             } else {
-                playerTurnBlocked = false; // プレイヤーの操作ブロックを解除
+                playerTurnBlocked = false;
                 updateMessage('あなたの番です');
-                renderBoard(); // プレイヤーの番になったので、ヒント付きで盤面を再描画
+                renderBoard();
             }
         }
 
@@ -319,21 +373,17 @@
         function getFlips(r, c, player) {
             const opponent = (player === BLACK) ? WHITE : BLACK;
             const allFlips = [];
-
             for (const [dr, dc] of DIRECTIONS) {
                 let currentFlips = [];
                 let cr = r + dr;
                 let cc = c + dc;
-
                 while (cr >= 0 && cr < BOARD_SIZE && cc >= 0 && cc < BOARD_SIZE) {
                     if (board[cr][cc] === opponent) {
                         currentFlips.push({ r: cr, c: cc });
                     } else if (board[cr][cc] === player) {
                         allFlips.push(...currentFlips);
                         break;
-                    } else { // EMPTY
-                        break;
-                    }
+                    } else { break; }
                     cr += dr;
                     cc += dc;
                 }
@@ -346,16 +396,11 @@
             let bestScore = -Infinity;
             let bestMove = null;
             const validMoves = getValidMoves(WHITE);
-
             if (validMoves.length === 0) return null;
             if (validMoves.length === 1) return validMoves[0];
 
             for (const move of validMoves) {
-                const newBoard = JSON.parse(JSON.stringify(board)); // ボードをディープコピー
-                const piecesToFlip = getFlips(move.r, move.c, WHITE);
-                newBoard[move.r][move.c] = WHITE;
-                piecesToFlip.forEach(p => { newBoard[p.r][p.c] = WHITE; });
-                
+                const newBoard = createNewBoardState(board, move, WHITE);
                 const score = minimax(newBoard, AI_DEPTH - 1, -Infinity, Infinity, false);
                 if (score > bestScore) {
                     bestScore = score;
@@ -378,28 +423,24 @@
                  return minimax(currentBoard, depth - 1, alpha, beta, !isMaximizingPlayer);
             }
 
-            if (isMaximizingPlayer) { // AIのターン（最大化）
+            if (isMaximizingPlayer) {
                 let maxEval = -Infinity;
                 for (const move of validMoves) {
                     const newBoard = createNewBoardState(currentBoard, move, player);
                     const evaluation = minimax(newBoard, depth - 1, alpha, beta, false);
                     maxEval = Math.max(maxEval, evaluation);
                     alpha = Math.max(alpha, evaluation);
-                    if (beta <= alpha) {
-                        break; // ベータ枝刈り
-                    }
+                    if (beta <= alpha) break;
                 }
                 return maxEval;
-            } else { // プレイヤーのターン（最小化）
+            } else {
                 let minEval = Infinity;
                 for (const move of validMoves) {
                     const newBoard = createNewBoardState(currentBoard, move, player);
                     const evaluation = minimax(newBoard, depth - 1, alpha, beta, true);
                     minEval = Math.min(minEval, evaluation);
                     beta = Math.min(beta, evaluation);
-                    if (beta <= alpha) {
-                        break; // アルファ枝刈り
-                    }
+                    if (beta <= alpha) break;
                 }
                 return minEval;
             }
@@ -461,19 +502,4 @@
                     } else if (b[cr][cc] === player) {
                         allFlips.push(...currentFlips);
                         break;
-                    } else {
-                        break;
-                    }
-                    cr += dr;
-                    cc += dc;
-                }
-            }
-            return allFlips;
-        }
-
-
-        // --- ゲーム開始 ---
-        window.onload = initGame;
-    </script>
-</body>
-</html>
+                    } else { bre
