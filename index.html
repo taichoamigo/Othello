@@ -502,4 +502,13 @@
                     } else if (b[cr][cc] === player) {
                         allFlips.push(...currentFlips);
                         break;
-                    } else { bre
+                    } else { break; }
+                    cr += dr;
+                    cc += dc;
+                }
+            }
+            return allFlips;
+        }
+    </script>
+</body>
+</html>
